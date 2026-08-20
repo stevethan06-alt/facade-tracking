@@ -59,6 +59,8 @@
   .task-input{width:100%;background:transparent;border:none;border-bottom:1px dashed var(--line);color:var(--paper);font-size:13px;padding:3px 2px;font-weight:600;}
   .task-input:focus{outline:none;border-bottom-color:var(--blueprint);}
   .date-input, .sel-input{background:var(--panel);border:1px solid var(--line);color:var(--paper);border-radius:4px;padding:4px 6px;font-family:'Consolas','Courier New',monospace;font-size:12px;}
+  .status-text-input{width:100%;background:var(--panel);border:1px solid var(--line);color:var(--paper);border-radius:4px;padding:5px 8px;font-size:12.5px;}
+  .status-text-input:focus{outline:none;border-color:var(--blueprint);}
   .pct-input{width:56px;background:var(--panel);border:1px solid var(--line);color:var(--paper);border-radius:4px;padding:4px 6px;text-align:center;font-family:'Consolas','Courier New',monospace;}
   .pct-input:disabled{opacity:.65;background:var(--panel-2);}
 
@@ -134,18 +136,18 @@
   <div id="viewSchedule" style="display:none;">
     <div class="panel flat" style="margin-bottom:14px;">
       <p class="axis-name">Tiến độ thi công khối đế & Công tác con</p>
-      <p class="axis-note">Quản lý các mốc công tác lớn và chi tiết các công tác con thành phần.</p>
+      <p class="axis-note">Quản lý các mốc công tác lớn, chi tiết các công tác con thành phần và trạng thái tùy chỉnh.</p>
       <table>
         <thead>
           <tr>
             <th style="width:4%">STT</th>
-            <th style="width:28%">Tên công tác / Công tác con</th>
+            <th style="width:26%">Tên công tác / Công tác con</th>
             <th style="width:11%">Phòng ban</th>
             <th style="width:9%">Khu vực</th>
             <th style="width:8%">Bắt đầu</th>
             <th style="width:8%">Kết thúc</th>
             <th style="width:14%">% Hoàn thành</th>
-            <th style="width:14%">Trạng thái</th>
+            <th style="width:16%">Trạng thái (Tự điền)</th>
             <th style="width:4%"></th>
           </tr>
         </thead>
@@ -243,22 +245,22 @@ const DEPARTMENTS = [
 const DEPT_MAP = Object.fromEntries(DEPARTMENTS.map(d=>[d.id,d]));
 
 const DEFAULT_TASKS = [
-  {task:"Lắp dựng EL(1) — Trục 1X7~1X1", dept:"sitework", el:"EL1", pct:0, start:"", end:"", subtasks:[
+  {task:"Lắp dựng EL(1) — Trục 1X7~1X1", dept:"sitework", el:"EL1", pct:0, start:"", end:"", statusText:"Đang triển khai", subtasks:[
     {name:"Khảo sát mặt bằng & thả tuyến", done:true},
     {name:"Lắp đặt bas/bracket neo", done:false},
     {name:"Lắp dựng các khung nhôm EWS", done:false}
   ]},
-  {task:"Lắp dựng Drop Out — Khu kỹ thuật", dept:"sitework", el:"DROPOUT", pct:0, start:"", end:"", subtasks:[
+  {task:"Lắp dựng Drop Out — Khu kỹ thuật", dept:"sitework", el:"DROPOUT", pct:0, start:"", end:"", statusText:"Chuẩn bị vật tư", subtasks:[
     {name:"Gia công kết cấu thép phụ", done:true},
     {name:"Lắp đặt các khung CW", done:false}
   ]},
 ];
 
-const STORE_KEY = "gma_facade_tracker_v13";
+const STORE_KEY = "gma_facade_tracker_v14";
 let state = null;
 let activeTab = ELEVATIONS[0].id;
 let mainView = "sitework";
-let expandedSubtasks = {}; // track opened/closed subtasks rows
+let expandedSubtasks = {};
 
 function freshPanel(code, qty, w=0, h=0){
   const stages = {};
@@ -282,6 +284,8 @@ function loadState(){
           state.elevations[el.id] = { panels: el.panels.map(p=>freshPanel(p.code,p.qty,p.w||0,p.h||0)) };
         }
       });
+      // Ensure statusText exists in tasks
+      state.tasks.forEach(t=>{ if(t.statusText === undefined) t.statusText = ""; });
     } else {
       state = defaultState();
       saveState();
@@ -596,13 +600,11 @@ function renderPanel(){
     </div>`;
 }
 
-function statusFromPct(pct){ return pct>=100?3:pct>=60?2:pct>0?1:0; }
-const GENERIC_STATUS_LABELS = ["Chưa bắt đầu","Đang triển khai","Sắp xong","Hoàn thành"];
-
 function updateTaskField(idx, field, val){ state.tasks[idx][field] = val; saveState(); renderSchedule(); }
 function updateTaskDept(idx, val){ state.tasks[idx].dept = val; if(!val) state.tasks[idx].el=""; saveState(); renderSchedule(); }
 function updateTaskEl(idx, val){ state.tasks[idx].el = val; saveState(); renderSchedule(); }
 function updateTaskPct(idx, val){ const n=parseInt(val,10); state.tasks[idx].pct = isNaN(n)?0:Math.min(100,Math.max(0,n)); saveState(); renderSchedule(); }
+function updateTaskStatusText(idx, val){ state.tasks[idx].statusText = val; saveState(); }
 function deleteTask(idx){ state.tasks.splice(idx,1); saveState(); renderSchedule(); }
 
 function toggleSubtasksRow(idx){
@@ -639,7 +641,7 @@ function addTask(){
   const input = document.getElementById("newTask");
   const name = input.value.trim();
   if(!name) return;
-  state.tasks.push({task:name, dept:"", el:"", pct:0, start:"", end:"", subtasks:[]});
+  state.tasks.push({task:name, dept:"", el:"", pct:0, start:"", end:"", statusText:"", subtasks:[]});
   input.value=""; saveState(); renderSchedule();
 }
 
@@ -649,11 +651,11 @@ function renderSchedule(){
   
   state.tasks.forEach((t,idx)=>{
     const pct = taskPct(t);
-    const st = statusFromPct(pct);
     const linked = !!(t.dept && t.el);
     const elOpts = t.dept ? ELEVATIONS.map(el=>`<option value="${el.id}" ${t.el===el.id?'selected':''}>${el.label}</option>`).join("") : "";
     const hasSub = t.subtasks && t.subtasks.length > 0;
     const isExpanded = !!expandedSubtasks[idx];
+    const statusTextVal = t.statusText || "";
 
     rows += `<tr>
       <td class="code">${idx+1}</td>
@@ -683,7 +685,9 @@ function renderSchedule(){
           <input type="number" class="pct-input" value="${pct}" min="0" max="100" ${linked || hasSub ? 'disabled':''} onchange="updateTaskPct(${idx},this.value)">
         </div>
       </td>
-      <td><span class="status-btn st-${st}" style="cursor:default;">${GENERIC_STATUS_LABELS[st]}</span></td>
+      <td>
+        <input type="text" class="status-text-input" value="${statusTextVal.replace(/"/g,'&quot;')}" placeholder="Nhập trạng thái..." onchange="updateTaskStatusText(${idx},this.value)">
+      </td>
       <td><button class="del-btn" onclick="deleteTask(${idx})" title="Xoá">✕</button></td>
     </tr>`;
 
