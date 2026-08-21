@@ -166,18 +166,25 @@
 // Tích hợp đường dẫn Google Apps Script Web App của bạn
 const GOOGLE_SHEET_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyLG0ZI1pu62bjjyCOSqHIGq_dEuY_JuapggWcCOK4_k_3XYOjXOFT0Ape4kqLOzMwfOw/exec";
 
-function syncToGoogleSheet() {
+// Hàm gửi thông tin cô đọng khi có thay đổi
+function syncToGoogleSheet(deptId, panelCode, statusDesc) {
   if (!GOOGLE_SHEET_WEB_APP_URL.startsWith("http")) return;
+  
+  const payload = {
+    dept: DEPT_MAP[deptId] ? DEPT_MAP[deptId].name : deptId,
+    code: panelCode,
+    changeText: statusDesc
+  };
+
   fetch(GOOGLE_SHEET_WEB_APP_URL, {
     method: "POST",
     mode: "no-cors",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(state)
+    body: JSON.stringify(payload)
   }).catch(err => {
     console.error("Lỗi đồng bộ Google Sheet:", err);
   });
 }
-
 const ELEVATIONS = [
   { id:"EL1", label:"EL (1)", axis:"Trục 1X7 ~ 1X1", type:"el", note:"Đã cập nhật kích thước chuẩn bản vẽ.",
     panels:[
@@ -528,8 +535,13 @@ function cycleStatus(elId, idx){
   s.status = (s.status+1)%4;
   if(s.status === 3) s.qtyDone = p.qty;
   else if(s.status === 0) s.qtyDone = 0;
+  
+  // Gọi đẩy dữ liệu gọn về Google Sheet
+  syncToGoogleSheet(mainView, p.code, "Chuyển trạng thái: " + DEPT_MAP[mainView].statuses[s.status]);
+  
   saveState(); render();
 }
+
 function updateQtyDone(elId, idx, val){
   const n = parseInt(val,10);
   const p = state.elevations[elId].panels[idx];
@@ -538,8 +550,13 @@ function updateQtyDone(elId, idx, val){
   if(s.qtyDone === p.qty) s.status = 3;
   else if(s.qtyDone > 0) s.status = 2;
   else s.status = 0;
+  
+  // Gọi đẩy dữ liệu gọn về Google Sheet
+  syncToGoogleSheet(mainView, p.code, "Cập nhật SL xong: " + s.qtyDone + "/" + p.qty);
+  
   saveState(); render();
 }
+
 function updateNote(elId, idx, val){ state.elevations[elId].panels[idx].stages[mainView].note = val; saveState(); }
 function deletePanel(elId, idx){ state.elevations[elId].panels.splice(idx,1); saveState(); render(); }
 function addPanel(elId){
